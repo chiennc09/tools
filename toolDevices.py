@@ -2,7 +2,6 @@ import os
 import time
 import threading
 import subprocess
-import base64
 import random
 import logging
 
@@ -15,9 +14,9 @@ except ImportError:
     import numpy as np
     import cv2
 
-# Cấu hình logging để print ra console đẹp hơn và có màu
+# Cấu hình logging
 logging.basicConfig(
-    level=logging.DEBUG, 
+    level=logging.INFO, 
     format='%(asctime)s | %(levelname)s | %(message)s', 
     datefmt='%H:%M:%S'
 )
@@ -25,10 +24,12 @@ logging.basicConfig(
 class Auto:
     def __init__(self, handle):
         self.handle = handle
+        self.current_screen = None # Cache màn hình cục bộ mỗi nhịp
+        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.has_adb_keyboard = None # Caching ADBKeyboard check
 
-    def screen_capture(self):
+    def capture(self):
         try:
-            # Ưu tiên bắt luồng bytes trực tiếp (rất nhanh nhưng dễ kẹt trên Win)
             result = subprocess.run(
                 f'adb -s {self.handle} exec-out screencap -p',
                 shell=True,
@@ -38,86 +39,108 @@ class Auto:
             image_bytes = result.stdout
             
             if not image_bytes:
+                self.current_screen = None
                 return None
                 
             arr = np.frombuffer(image_bytes, np.uint8)
             if len(arr) == 0:
-                raise ValueError("Buffer trống")
+                self.current_screen = None
+                return None
                 
-            return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            self.current_screen = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            return self.current_screen
 
         except (subprocess.TimeoutExpired, ValueError):
-            # Nếu exec-out bị treo / lag (Lỗi rất phổ biến của giả lập LDPlayer trên Windows)
-            # >> Cứu hộ bằng cách chụp lưu vào ổ cứng giả lập rồi kéo ra ngoài
             try:
                 subprocess.run(f'adb -s {self.handle} shell screencap -p /sdcard/tmp_cap.png', shell=True, timeout=5)
                 subprocess.run(f'adb -s {self.handle} pull /sdcard/tmp_cap.png screen_{self.handle}.png', capture_output=True, shell=True, timeout=5)
                 
                 if os.path.exists(f'screen_{self.handle}.png'):
-                    img = cv2.imread(f'screen_{self.handle}.png')
-                    return img
-            except Exception as e2:
-                logging.error(f"[{self.handle}] Lỗi chụp hình Cứu hộ: {e2}")
+                    self.current_screen = cv2.imread(f'screen_{self.handle}.png')
+                    return self.current_screen
+            except Exception:
+                pass
+            self.current_screen = None
             return None
-        except Exception as e:
-            logging.error(f"[{self.handle}] Lỗi screencap: {e}")
+        except Exception:
+            self.current_screen = None
             return None
 
     def click(self, x, y):
-        subprocess.run(f'adb -s {self.handle} shell input tap {x} {y}', shell=True)
+        # Thêm random biên độ nhỏ (5 px) để không click vào đúng 1 điểm tĩnh như máy
+        rx = x + random.randint(-5, 5)
+        ry = y + random.randint(-5, 5)
+        subprocess.run(f'adb -s {self.handle} shell input tap {rx} {ry}', shell=True)
 
-    def swipe(self, x1, y1, x2, y2):
-        subprocess.run(f"adb -s {self.handle} shell input touchscreen swipe {x1} {y1} {x2} {y2} 1000", shell=True)
-
-    def back(self):
-        subprocess.run(f"adb -s {self.handle} shell input keyevent 3", shell=True)
-
-    def delete_cache(self, package):
-        subprocess.run(f"adb -s {self.handle} shell pm clear {package}", shell=True)
+    def swipe(self, x1, y1, x2, y2, duration=1000):
+        # Hỗ trợ random thẳng ở cấp độ ADB swipe tránh nhận diện tool
+        rx1 = x1 + random.randint(-5, 5)
+        ry1 = y1 + random.randint(-5, 5)
+        rx2 = x2 + random.randint(-5, 5)
+        ry2 = y2 + random.randint(-5, 5)
+        actual_duration = duration + random.randint(-50, 100)
+        subprocess.run(f"adb -s {self.handle} shell input touchscreen swipe {rx1} {ry1} {rx2} {ry2} {actual_duration}", shell=True)
 
     def off(self, package="com.facebook.katana"):
         subprocess.run(f"adb -s {self.handle} shell am force-stop {package}", shell=True)
 
+    def remove_accents(self, input_str):
+        s1 = u'ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝàáâãèéêìíòóôõùúýĂăĐđĨĩŨũƠơƯưẠạẢảẤấẦầẨẩẪẫẬậẮắẰằẲẳẴẵẶặẸẹẺẻẼẽẾếỀềỂểỄễỆệỈỉỊịỌọỎỏỐốỒồỔổỖỗỘộỚớỜờỞởỠỡỢợỤụỦủỨứỪừỬửỮữỰựỲỳỴỵỶỷỸỹ'
+        s0 = u'AAAAEEEIIOOOOUUYaaaaeeeiioooouuyAaDdIiUuOoUuAaAaAaAaAaAaAaAaAaAaAaAaEeEeEeEeEeEeEeEeIiIiOoOoOoOoOoOoOoOoOoOoOoOoUuUuUuUuUuUuUuUuYyYyYyYy'
+        s = ''
+        for c in str(input_str):
+            if c in s1:
+                s += s0[s1.index(c)]
+            else:
+                s += c
+        return s
+
     def InpuText(self, text=None, VN=""):
-        # Chuyển hoàn toàn sang dùng Native ADB (Không xài Broadcast ADBKeyboard nữa)
+        import base64
         text_to_send = text if text is not None else VN
         
-        # ADB 'input text' yêu cầu thay khoảng trắng bằng %s và escape dấu nháy đơn
-        safe_text = str(text_to_send).replace("'", "\\'").replace(" ", "%s")
-        
-        # Gửi ký tự
-        subprocess.run(f"adb -s {self.handle} shell input text '{safe_text}'", shell=True)
+        if self.has_adb_keyboard is None:
+            try:
+                res = subprocess.run(f"adb -s {self.handle} shell pm list packages", shell=True, capture_output=True, text=True)
+                self.has_adb_keyboard = "adbkeyboard" in res.stdout.lower()
+            except Exception:
+                self.has_adb_keyboard = False
+
+        if self.has_adb_keyboard:
+            b64_text = base64.b64encode(str(text_to_send).encode('utf-8')).decode('utf-8')
+            subprocess.run(f"adb -s {self.handle} shell am broadcast -a ADB_INPUT_B64 --es msg '{b64_text}'", shell=True)
+        else:
+            safe_text = self.remove_accents(text_to_send)
+            safe_text = safe_text.replace("'", "\\'").replace(" ", "%s")
+            subprocess.run(f"adb -s {self.handle} shell input text '{safe_text}'", shell=True)
 
     def find(self, img_name, threshold=0.80):
-        # Hạ threshold xuống 0.80 (độ chính xác 80%) thay vì 0.95 để thích ứng với giao diện FB hiện tại
-        img_path = os.path.join(os.path.dirname(__file__) or '.', img_name)
+        img_path = os.path.join(self.base_dir, img_name)
         if not os.path.exists(img_path):
             return []
             
         template = cv2.imread(img_path)
-        screen = self.screen_capture()
+        screen = self.current_screen
         if screen is None or template is None:
             return []
             
         try:
             result = cv2.matchTemplate(template, screen, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, max_loc = cv2.minMaxLoc(result)
-            
-            # Gỡ lỗi: Lưu lại giá trị khớp cao nhất nếu nó gần đạt ngưỡng
-            if 0.5 < max_val < threshold:
-                logging.debug(f"[{self.handle}] Gần giống {img_name}: {max_val*100:.1f}% (Cần > {threshold*100}%)")
-
             loc = np.where(result >= threshold)
-            retVal = list(zip(*loc[::-1]))
-            return retVal
-        except Exception as e:
-            logging.error(f"[{self.handle}] Lỗi OpenCV: {e}")
+            matches = list(zip(*loc[::-1]))
+            if not matches:
+                return []
+            
+            h, w = template.shape[:2]
+            # Trả về TÂM CỦA ẢNH thay vì góc trái trên để click chuẩn và không bị out viền
+            return [(x + w//2, y + h//2) for x, y in matches]
+        except Exception:
             return []
 
 def get_devices():
     try:
         output = subprocess.check_output("adb devices", shell=True).decode('utf-8')
-        lines = output.strip().split('\n')[1:] # Bỏ đi dòng 'List of devices attached'
+        lines = output.strip().split('\n')[1:] 
         devices = []
         for line in lines:
             if 'device' in line and 'offline' not in line:
@@ -127,45 +150,64 @@ def get_devices():
         print(f"Lỗi lấy ID thiết bị: {e}")
         return []
 
+def random_sleep(min_s, max_s):
+    # Hàm sleep random nhanh chóng 
+    time.sleep(random.uniform(min_s, max_s))
+
 class Worker(threading.Thread):
-    def __init__(self, device_id, min_sleep, max_sleep, comments):
+    def __init__(self, device_id, min_sleep, max_sleep, cmt_file):
         super().__init__()
         self.device_id = device_id
         self.min_sleep = min_sleep
         self.max_sleep = max_sleep
-        self.comments = comments
+        self.cmt_file = cmt_file
         self.d = Auto(device_id)
         self.is_running = True
-        
-        # Format tên đơn giản Phone-XXXX (Lấy 4 kí tự cuối của id ADB)
         self.name_ld = f"Phone-{device_id[-4:]}"
 
     def log(self, msg):
         logging.info(f"[{self.name_ld}] {msg}")
 
+    def get_dynamic_comment(self):
+        try:
+            if os.path.exists(self.cmt_file):
+                with open(self.cmt_file, 'r', encoding='utf-8') as f:
+                    lines = [l.strip() for l in f.readlines() if l.strip()]
+                if lines:
+                    return random.choice(lines)
+        except Exception as e:
+            self.log(f"Lỗi tải comment: {e}")
+            pass
+        return "Tương tác tốt nhé"
+
     def run(self):
-        # Sử dụng State Machine, các biến trạng thái, tránh Đệ Quy Gọi lồng hàm
         state = 1
         error_count = 0
 
         while self.is_running:
             try:
-                # Tính năng tự giải cứu khi bị crash fb hoặc lag mất element
                 if error_count >= 10:
-                    self.log("Lỗi liên tục 10 lần. Đang reset lại quy trình FB...")
+                    self.log("Lỗi định vị hình ảnh 10 lần. Đang reset lại quy trình FB...")
                     self.d.off()
-                    time.sleep(2)
+                    random_sleep(1.0, 2.0)
                     state = 1
                     error_count = 0
+                    continue
+
+                screen = self.d.capture()
+                if screen is None:
+                    error_count += 1
+                    random_sleep(0.5, 1.0)
                     continue
 
                 if state == 1:
                     poin3 = self.d.find('img\\5.png', 0.80)
                     if poin3:
                         x, y = poin3[0][0], poin3[0][1]
-                        self.d.swipe(x, y, x, y + 1500)
+                        # Vuốt random cự ly và toạ độ
+                        self.d.swipe(x, y, x + random.randint(-30, 30), y + random.randint(1200, 1600), random.randint(300, 700))
                         self.log("Vuốt đóng popup về NewFeed (5.png)")
-                        time.sleep(1)
+                        random_sleep(0.5, 1.0)
                         error_count = 0
                         continue
 
@@ -175,7 +217,7 @@ class Worker(threading.Thread):
                         self.log("Mở App Facebook (3.png)")
                         state = 2
                         error_count = 0
-                        time.sleep(1)
+                        random_sleep(1.0, 2.0)
                         continue
 
                     poin2 = self.d.find('img\\1.png', 0.80)
@@ -184,20 +226,20 @@ class Worker(threading.Thread):
                         self.log("Phát hiện nút Like (1.png)")
                         state = 3
                         error_count = 0
-                        time.sleep(1)
+                        random_sleep(0.5, 1.0)
                         continue
 
                     error_count += 1
-                    time.sleep(1)
+                    random_sleep(0.5, 1.0)
 
                 elif state == 2:
                     poin3 = self.d.find('img\\5.png', 0.80)
                     if poin3:
                         x, y = poin3[0][0], poin3[0][1]
-                        self.d.swipe(x, y, x, y + 1500)
+                        self.d.swipe(x, y, x + random.randint(-30, 30), y + random.randint(1200, 1600), random.randint(300, 700))
                         self.log("Vuốt đóng popup về NewFeed (5.png)")
                         error_count = 0
-                        time.sleep(1)
+                        random_sleep(0.5, 1.0)
                         continue
 
                     poin2 = self.d.find('img\\3.png', 0.80)
@@ -205,7 +247,7 @@ class Worker(threading.Thread):
                         self.d.click(poin2[0][0], poin2[0][1])
                         self.log("Mở Feed Facebook (3.png)")
                         error_count = 0
-                        time.sleep(1)
+                        random_sleep(0.8, 1.5)
                         continue
 
                     poin = self.d.find('img\\1.png', 0.80)
@@ -214,28 +256,29 @@ class Worker(threading.Thread):
                         self.log("Bấm LIKE bài viết !! (1.png)")
                         state = 3
                         error_count = 0
-                        time.sleep(1)
+                        random_sleep(0.5, 1.2)
                         continue
 
-                    # Nếu không thấy các nút trên, thực hiện Lướt
-                    self.log("Lướt New Feed (Swipe)...")
-                    self.d.swipe(268, 705, 268, 362)
-                    time.sleep(2)
-                    self.d.swipe(268, 705, 268, 362)
-                    time.sleep(1)
+                    self.log("Lướt New Feed...")
+                    for _ in range(2):
+                        x1 = random.randint(200, 400)
+                        y1 = random.randint(700, 950)
+                        x2 = x1 + random.randint(-40, 40)
+                        y2 = random.randint(100, 300)
+                        duration = random.randint(300, 750)
+                        self.d.swipe(x1, y1, x2, y2, duration)
+                        random_sleep(1.0, 2.0)
                     error_count += 1
 
                 elif state == 3:
-                    cmt_text = random.choice(self.comments).strip() if self.comments else "Tương tác tốt nhé"
-                    self.current_cmt = cmt_text
-
                     poin7 = self.d.find('img\\7.png', 0.80)
                     if poin7:
+                        cmt_text = self.get_dynamic_comment()
                         self.d.click(poin7[0][0], poin7[0][1])
-                        time.sleep(1)
+                        random_sleep(0.5, 1.0)
                         self.log(f"Bấm ô nhập Cmt (7.png) - Gõ: [{cmt_text}]")
                         self.d.InpuText(VN=cmt_text) 
-                        time.sleep(2)
+                        random_sleep(1.0, 1.5)
                         state = 4
                         error_count = 0
                         continue
@@ -243,34 +286,36 @@ class Worker(threading.Thread):
                     poin = self.d.find('img\\2.png', 0.80)
                     if poin:
                         self.d.click(poin[0][0], poin[0][1])
-                        time.sleep(2)
+                        random_sleep(1.0, 1.8)
                         self.log("Bấm Icon Bình Luận để mở Popup (2.png)")
                         error_count = 0
                         continue
                     
                     error_count += 1
-                    time.sleep(1)
+                    random_sleep(0.5, 1.0)
 
                 elif state == 4:
                     poin6 = self.d.find('img\\6.png', 0.80)
                     if poin6:
                         self.log("Đã thấy nút Gửi (6.png), Bấm Gửi!")
                         self.d.click(poin6[0][0], poin6[0][1])
-                        time.sleep(2)
+                        random_sleep(2.5, 3.5)
                         error_count = 0
+
+                        continue
 
                     poin3 = self.d.find('img\\5.png', 0.80)
                     if poin3:
                         x, y = poin3[0][0], poin3[0][1]
-                        self.d.swipe(x, y, x, y + 1500)
+                        self.d.swipe(x, y, x + random.randint(-30, 30), y + random.randint(1200, 1600), random.randint(300, 700))
                         self.log("Vuốt Đóng Popup Comment về Feed (5.png)")
-                        time.sleep(1)
+                        random_sleep(0.5, 1.0)
                         
                         sleep_time = random.randint(self.min_sleep, self.max_sleep)
-                        self.log(f"HOÀN THÀNH - Đang chờ ngủ ({sleep_time}s) để cày bài tiếp theo...")
-                        time.sleep(sleep_time)
+                        self.log(f"HOÀN THÀNH - Đang chờ cày tiếp ({sleep_time}s)")
+                        random_sleep(sleep_time, sleep_time + 2) 
                         
-                        state = 2 # Chuyển lại trạng thái lướt Feed
+                        state = 2
                         error_count = 0
                         continue
 
@@ -278,27 +323,27 @@ class Worker(threading.Thread):
                     if poin2:
                         self.d.click(poin2[0][0], poin2[0][1])
                         self.log("Bấm Trở Về / Tắt Cmt (4.png)")
-                        time.sleep(1)
+                        random_sleep(0.5, 1.0)
                         
                         sleep_time = random.randint(self.min_sleep, self.max_sleep)
-                        self.log(f"HOÀN THÀNH - Đang chờ ngủ ({sleep_time}s) để cày bài tiếp theo...")
-                        time.sleep(sleep_time)
+                        self.log(f"HOÀN THÀNH - Đang chờ ({sleep_time}s)")
+                        random_sleep(sleep_time, sleep_time + 2)
                         
                         state = 2
                         error_count = 0
                         continue
 
                     error_count += 1
-                    time.sleep(1)
+                    random_sleep(0.5, 1.5)
 
             except Exception as e:
                 self.log(f"Lỗi Script: {e}")
                 error_count += 1
-                time.sleep(2)
+                random_sleep(1.0, 2.0)
 
 def main():
     print("="*60)
-    print("          TOOL FACEBOOK AUTOMATION NEW PRO (2026)")
+    print("      TOOL AUTOMATION")
     print("="*60)
     
     devices = get_devices()
@@ -308,33 +353,35 @@ def main():
 
     print(f"[+] Tìm thấy {len(devices)} thiết bị: {', '.join(devices)}")
 
-    lis_cm = ["Tương tác nha!", "Chấm mút nha", "Cho mình xin giá"]
-    try:
-        if os.path.exists('cmt.txt'):
-            with open('cmt.txt', 'r', encoding='utf-8') as f:
-                lis_cm = [l.strip() for l in f.readlines() if l.strip()]
-            print(f"[+] Đã tải {len(lis_cm)} bình luận từ file cmt.txt.")
-        else:
-            print("[-] Không có file cmt.txt, tự động tạo mới.")
-            with open('cmt.txt', 'w', encoding='utf-8') as f:
-                f.write("\n".join(lis_cm))
-    except Exception as e:
-        print(f"[-] Lỗi đọc file cmt.txt: {e}")
-
-    min_sleep = 10
-    max_sleep = 30
-    print(f"[+] Sử dụng thời gian nghỉ mặc định: {min_sleep}s - {max_sleep}s (do chế độ IDE debug thường không cho gõ phím).")
+    min_sleep = 3
+    max_sleep = 8
+    print(f"[+] Thời gian nghỉ: ngẫu nhiên {min_sleep}s - {max_sleep}s.")
 
     threads = []
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    
     print(f"[+] Đang khởi chạy hệ thống ĐA LUỒNG trên {len(devices)} thiết bị...")
     for dev in devices:
-        worker = Worker(dev, min_sleep, max_sleep, lis_cm)
-        worker.daemon = True # Nếu tắt tiến trình chính thì dừng hết
+        dev_short = dev[-4:] if len(dev) >= 4 else dev
+        cmt_file = os.path.join(base_dir, f"cmt_{dev_short}.txt")
+        
+        if not os.path.exists(cmt_file):
+            default_cmts = ["Tương tác nha!", "Chấm mút nha", "Cho mình xin giá"]
+            try:
+                with open(cmt_file, 'w', encoding='utf-8') as f:
+                    f.write("\n".join(default_cmts))
+                print(f"[+] Đã tạo file comment {cmt_file} cho Phone-{dev_short}")
+            except Exception as e:
+                print(f"[-] Lỗi tạo file {cmt_file}: {e}")
+        else:
+            print(f"[+] Đã tìm thấy file comment {cmt_file} cho Phone-{dev_short}")
+
+        worker = Worker(dev, min_sleep, max_sleep, cmt_file)
+        worker.daemon = True
         worker.start()
         threads.append(worker)
 
     try:
-        # Giữ main console thread chạy tiếp
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
