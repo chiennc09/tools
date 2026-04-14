@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from typing import Dict, Any
 
 from bot_manager import BotManager
+import config_helper
 
 app = FastAPI(title="ToolFace Automation V2")
 
@@ -25,6 +26,22 @@ class StartBotPayload(BaseModel):
     resolution: str
     min_sleep: float = 3.0
     max_sleep: float = 8.0
+
+class ConfigPayload(BaseModel):
+    base_resolution: str
+
+@app.get("/api/config")
+def get_config():
+    return {"status": "success", "data": config_helper.load_config()}
+
+@app.post("/api/config")
+def update_config(payload: ConfigPayload):
+    config = config_helper.load_config()
+    config["base_resolution"] = payload.base_resolution
+    if config_helper.save_config(config):
+        return {"status": "success", "message": "Config updated"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to save config")
 
 @app.get("/api/devices")
 def get_devices():

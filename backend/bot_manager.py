@@ -4,6 +4,7 @@ import asyncio
 from typing import Dict, List
 import sys
 import os
+import config_helper
 
 # Add parent directory to path to import core
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,10 +34,14 @@ class BotManager:
         if device_id in self.workers and self.workers[device_id].is_running:
             return {"success": False, "error": "Bot is already running for this device."}
         
+        config = config_helper.load_config()
+        base_res = config.get("base_resolution", "720x1280")
+        
         worker = BotWorker(
             device_id=device_id,
             mode=mode,
             resolution=resolution,
+            base_resolution_str=base_res,
             min_sleep=min_sleep,
             max_sleep=max_sleep,
             log_callback=self.broadcast_log

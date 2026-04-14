@@ -20,6 +20,7 @@ export default function App() {
   const [resolutions, setResolutions] = useState<Record<string, string>>({});
   const [minSleeps, setMinSleeps] = useState<Record<string, number>>({});
   const [maxSleeps, setMaxSleeps] = useState<Record<string, number>>({});
+  const [globalBaseRes, setGlobalBaseRes] = useState<string>('720x1280');
   
   const logsEndRef = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -32,6 +33,7 @@ export default function App() {
   }, [logs]);
 
   useEffect(() => {
+    fetchGlobalConfig();
     fetchDevices();
     fetchStatus();
 
@@ -74,6 +76,26 @@ export default function App() {
       clearInterval(interval);
     };
   }, []);
+
+  const fetchGlobalConfig = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/api/config`);
+      if (res.data && res.data.data) {
+        setGlobalBaseRes(res.data.data.base_resolution || '720x1280');
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleGlobalResChange = async (newRes: string) => {
+    try {
+      setGlobalBaseRes(newRes);
+      await axios.post(`${API_BASE}/api/config`, { base_resolution: newRes });
+    } catch (e) {
+      alert("Lỗi khi lưu cấu hình chung");
+    }
+  };
 
   const fetchDevices = async () => {
     try {
@@ -152,12 +174,30 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 p-8">
       <div className="max-w-7xl mx-auto">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-2">
-            <Activity className="text-blue-600" />
-            ToolFace Automation Central
-          </h1>
-          <p className="text-slate-500 mt-2">Hệ thống quản lý Farm thiết bị đa luồng - Hiện tại: {devices.length} thiết bị đang kết nối</p>
+        <header className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-2">
+              <Activity className="text-blue-600" />
+              ToolFace Automation Central
+            </h1>
+            <p className="text-slate-500 mt-2">Hệ thống quản lý Farm thiết bị đa luồng - Hiện tại: {devices.length} thiết bị đang kết nối</p>
+          </div>
+          
+          <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex items-center gap-3">
+            <Settings className="text-slate-400" size={20} />
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase">Độ phân giải gốc thư mục /img</label>
+              <select 
+                className="mt-1 w-full border-b border-slate-200 text-sm focus:outline-none focus:border-blue-500 bg-transparent font-medium"
+                value={globalBaseRes}
+                onChange={(e) => handleGlobalResChange(e.target.value)}
+              >
+                <option value="720x1280">720 x 1280 (Mặc định)</option>
+                <option value="1080x1920">1080 x 1920</option>
+                <option value="540x960">540 x 960</option>
+              </select>
+            </div>
+          </div>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

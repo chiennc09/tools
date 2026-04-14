@@ -11,7 +11,7 @@ from core.utils.swipe_logic import (
 )
 
 class BotWorker(threading.Thread):
-    def __init__(self, device_id, mode, resolution, min_sleep, max_sleep, log_callback):
+    def __init__(self, device_id, mode, resolution, base_resolution_str, min_sleep, max_sleep, log_callback):
         super().__init__()
         self.device_id = device_id
         self.mode = mode
@@ -22,7 +22,14 @@ class BotWorker(threading.Thread):
         
         self.is_running = True
         self.adb = AdbHelper(device_id)
-        self.matcher = ImageMatcher(base_resolution=(720, 1280), current_resolution=resolution)
+        
+        # Parse base_resolution
+        try:
+            bw, bh = map(int, base_resolution_str.lower().split('x'))
+        except (ValueError, AttributeError):
+            bw, bh = 720, 1280
+            
+        self.matcher = ImageMatcher(base_resolution=(bw, bh), current_resolution=resolution)
         
         self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.cmt_dir = os.path.join(self.base_dir, "comment")
