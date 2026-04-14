@@ -28,6 +28,6 @@ def get_swipe_close_popup(screen_w, screen_h):
     # Vuốt từ nửa trên xuống dưới để tắt
     x1 = random.randint(int(screen_w * 0.2), int(screen_w * 0.8))
     x2 = random.randint(int(screen_w * 0.2), int(screen_w * 0.8))
-    y1 = random.randint(int(screen_h * 0.2), int(screen_h * 0.4))
-    y2 = random.randint(int(screen_h * 0.75), int(screen_h * 0.9))
+    y1 = random.randint(int(screen_h * 0.04), int(screen_h * 0.06))
+    y2 = random.randint(int(screen_h * 0.8), int(screen_h * 0.91))
     return x1, y1, x2, y2

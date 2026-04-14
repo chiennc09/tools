@@ -6,7 +6,7 @@ const API_BASE = 'http://localhost:8000';
 
 interface DeviceStatus {
   is_running: boolean;
-  mode: string;
+  mode: string[];
   resolution: string;
 }
 
@@ -16,7 +16,7 @@ export default function App() {
   const [logs, setLogs] = useState<Record<string, string[]>>({});
   
   // Config state
-  const [modes, setModes] = useState<Record<string, string>>({});
+  const [modes, setModes] = useState<Record<string, string[]>>({});
   const [resolutions, setResolutions] = useState<Record<string, string>>({});
   const [minSleeps, setMinSleeps] = useState<Record<string, number>>({});
   const [maxSleeps, setMaxSleeps] = useState<Record<string, number>>({});
@@ -105,7 +105,7 @@ export default function App() {
         setModes(prev => {
           const newModes = { ...prev };
           res.data.devices.forEach((dev: string) => {
-            if (!newModes[dev]) newModes[dev] = 'NEWFEED';
+            if (!newModes[dev]) newModes[dev] = ['NEWFEED'];
           });
           return newModes;
         });
@@ -150,7 +150,7 @@ export default function App() {
   const handleStart = async (deviceId: string) => {
     try {
       await axios.post(`${API_BASE}/api/bot/${deviceId}/start`, {
-        mode: modes[deviceId] || 'NEWFEED',
+        mode: modes[deviceId] || ['NEWFEED'],
         resolution: resolutions[deviceId] || '720x1280',
         min_sleep: Number(minSleeps[deviceId]) || 10.0,
         max_sleep: Number(maxSleeps[deviceId]) || 25.0
@@ -169,6 +169,20 @@ export default function App() {
     } catch (e: any) {
       alert("Lỗi khi dừng: " + (e.response?.data?.detail || e.message));
     }
+  };
+
+  const handleModeChange = (device: string, option: string, checked: boolean) => {
+    setModes(prev => {
+      const currentModes = prev[device] || [];
+      let newModes;
+      if (checked) {
+        newModes = [...currentModes, option];
+      } else {
+        newModes = currentModes.filter(m => m !== option);
+        if (newModes.length === 0) newModes = ['NEWFEED']; // prevent empty
+      }
+      return { ...prev, [device]: newModes };
+    });
   };
 
   return (
@@ -203,7 +217,7 @@ export default function App() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {devices.map((device) => {
             const isRunning = status[device]?.is_running || false;
-            const currentMode = status[device]?.mode || modes[device];
+            const currentModes = isRunning ? (status[device]?.mode || ['NEWFEED']) : (modes[device] || ['NEWFEED']);
             const currentRes = status[device]?.resolution || resolutions[device];
             const deviceLogs = logs[device] || [];
 
@@ -230,26 +244,38 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="p-4 grid grid-cols-2 gap-4 border-b border-slate-100">
+                <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-slate-100">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Chế Độ Hoạt Động</label>
-                    <select 
-                      disabled={isRunning}
-                      className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100"
-                      value={isRunning ? (status[device]?.mode || 'NEWFEED') : (modes[device] || 'NEWFEED')}
-                      onChange={(e) => setModes({...modes, [device]: e.target.value})}
-                    >
-                      <option value="NEWFEED">Lướt Newfeed & Like</option>
-                      <option value="REELS">Xem Reels</option>
-                      <option value="COMMENT">Tìm & Comment</option>
-                      <option value="MIX">Mix Đan Xen (Newfeed + Reels)</option>
-                    </select>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Tổ Hợp Kịch Bản Hoạt Động</label>
+                    <div className="flex flex-col gap-2 bg-slate-50 rounded-lg p-3 text-sm">
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" disabled={isRunning} 
+                           checked={currentModes.includes('NEWFEED')}
+                           onChange={(e) => handleModeChange(device, 'NEWFEED', e.target.checked)}
+                           className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 disabled:opacity-50" />
+                        <span className="text-slate-700 font-medium">Lướt Newsfeed & Like</span>
+                      </label>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" disabled={isRunning} 
+                           checked={currentModes.includes('REELS')}
+                           onChange={(e) => handleModeChange(device, 'REELS', e.target.checked)}
+                           className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 disabled:opacity-50" />
+                        <span className="text-slate-700 font-medium">Lướt xem Reels</span>
+                      </label>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" disabled={isRunning} 
+                           checked={currentModes.includes('COMMENT')}
+                           onChange={(e) => handleModeChange(device, 'COMMENT', e.target.checked)}
+                           className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 disabled:opacity-50" />
+                        <span className="text-slate-700 font-medium">Comment</span>
+                      </label>
+                    </div>
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Độ Phân Giải Máy</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Độ Phân Giải Giả Lập</label>
                     <select 
                       disabled={isRunning}
-                      className="w-full border border-slate-300 rounded-md p-2 text-sm disabled:bg-slate-100"
+                      className="w-full border border-slate-300 rounded-md p-2.5 text-sm disabled:bg-slate-100 bg-white"
                       value={resolutions[device] || '720x1280'}
                       onChange={(e) => setResolutions({...resolutions, [device]: e.target.value})}
                     >

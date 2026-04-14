@@ -22,6 +22,7 @@ class BotWorker(threading.Thread):
         
         self.is_running = True
         self.adb = AdbHelper(device_id)
+        self.newfeed_swipes = 0
         
         # Parse base_resolution
         try:
@@ -90,63 +91,55 @@ class BotWorker(threading.Thread):
                         self.log("Đã tìm thấy app Facebook. Đang mở...")
                         self.adb.click(*pt)
                         sleep_random(10, 15) # Chờ app load
-                        if self.mode.upper() == 'MIX':
-                            state = 'MIX_NEWFEED'
-                        elif self.mode.upper() == 'REELS':
+                        self.newfeed_swipes = 0
+                        if 'NEWFEED' in self.mode or 'COMMENT' in self.mode:
+                            state = 'NEWFEED_SPACE'
+                        elif 'REELS' in self.mode:
                             state = 'REELS_INIT'
                         else:
-                            state = self.mode.upper()
+                            state = 'NEWFEED_SPACE'
                         error_count = 0
                     else:
                         self.log("Đang tìm fb.png...")
                         error_count += 1
                         sleep_random(1, 2)
 
-                # MODE: NEWFEED
-                elif state == 'NEWFEED':
-                    # Thi thoảng like
-                    pt_like = self.matcher.find_image(screen, os.path.join(self.base_dir, 'img', 'newfeed', 'like.png'))
-                    if pt_like and random.random() < 0.2: # 20% like
-                        self.log("Thấy nút Like. Tiến hành thả tim!")
-                        self.adb.click(*pt_like)
-                        sleep_random(1, 2)
-
-                    # Normal scroll
-                    self.log("Lướt Newfeed...")
-                    x1, y1, x2, y2 = get_swipe_coords_2_7_up(self.screen_w, self.screen_h)
-                    self.adb.swipe(x1, y1, x2, y2)
-                    
-                    sleep_time = random.uniform(self.min_sleep, self.max_sleep)
-                    self.log(f"Đọc newfeed {sleep_time:.1f}s")
-                    sleep_random(sleep_time, sleep_time + 1)
-                    error_count = 0
-
-                # MODE: MIX_NEWFEED
-                elif state == 'MIX_NEWFEED':
-                    # Thi thoảng like
-                    pt_like = self.matcher.find_image(screen, os.path.join(self.base_dir, 'img', 'newfeed', 'like.png'))
-                    if pt_like and random.random() < 0.2:
-                        self.log("Thấy nút Like. Tiến hành thả tim!")
-                        self.adb.click(*pt_like)
-                        sleep_random(1, 2)
-
-                    # Check tab Reels if mix (10% cơ hội chuyển sang reels)
-                    if random.random() < 0.1:
+                # MODE: NEWFEED_SPACE
+                elif state == 'NEWFEED_SPACE':
+                    if 'NEWFEED' in self.mode:
+                        pt_like = self.matcher.find_image(screen, os.path.join(self.base_dir, 'img', 'newfeed', 'like.png'))
+                        if pt_like and random.random() < 0.2:
+                            self.log("Thấy nút Like. Tiến hành thả tim!")
+                            self.adb.click(*pt_like)
+                            sleep_random(1, 2)
+                            
+                    if 'COMMENT' in self.mode and self.newfeed_swipes >= 2:
+                        pt_cmt = self.matcher.find_image(screen, os.path.join(self.base_dir, 'img', 'comment', 'comment.png'))
+                        if pt_cmt and random.random() < 0.2:
+                            self.log("Đã thấy mục Comment. Bấm vào...")
+                            self.adb.click(*pt_cmt)
+                            sleep_random(5, 10)
+                            state = 'COMMENT_TYPING'
+                            self.newfeed_swipes = 0
+                            error_count = 0
+                            continue
+                            
+                    if 'REELS' in self.mode and random.random() < 0.1:
                         self.log("Chuyển sang luồng Reels...")
-                        state = 'MIX_REELS_INIT'
+                        state = 'REELS_INIT'
                         continue
-
-                    # Normal scroll
+                        
                     self.log("Lướt Newfeed...")
                     x1, y1, x2, y2 = get_swipe_coords_2_7_up(self.screen_w, self.screen_h)
                     self.adb.swipe(x1, y1, x2, y2)
+                    self.newfeed_swipes += 1
                     sleep_time = random.uniform(self.min_sleep, self.max_sleep)
                     self.log(f"Đọc newfeed {sleep_time:.1f}s")
                     sleep_random(sleep_time, sleep_time + 1)
                     error_count = 0
 
-                # Quá trình đồng bộ chuyển sang Reels chung cho 2 loại Mode (REELS và MIX_REELS)
-                elif state in ['REELS_INIT', 'MIX_REELS_INIT']:
+                # Quá trình đồng bộ chuyển sang Reels
+                elif state == 'REELS_INIT':
                     self.log("Lướt ngược để hiện thanh bar tab...")
                     x1, y1, x2, y2 = get_swipe_coords_top_down(self.screen_w, self.screen_h)
                     self.adb.swipe(x1, y1, x2, y2)
@@ -157,14 +150,13 @@ class BotWorker(threading.Thread):
                         pt_reels = self.matcher.find_image(screen2, os.path.join(self.base_dir, 'img', 'reels', 'reels.png'))
                         if not pt_reels:
                             pt_reels = self.matcher.find_image(screen2, os.path.join(self.base_dir, 'img', 'reels', 'reels2.png'))
+                            if not pt_reels:
+                                pt_reels = self.matcher.find_image(screen2, os.path.join(self.base_dir, 'img', 'reels', 'reels3.png'))
                             
                         if pt_reels:
                             self.log("Bấm sang tab Reels")
                             self.adb.click(*pt_reels)
-                            if state == 'REELS_INIT':
-                                state = 'REELS'
-                            else:
-                                state = 'MIX_REELS'
+                            state = 'REELS_SPACE'
                             sleep_random(3, 5)
                             error_count = 0
                             continue
@@ -175,26 +167,15 @@ class BotWorker(threading.Thread):
                     else:
                         error_count += 1
 
-                # MODE: REELS
-                elif state == 'REELS':
-                    sleep_time = random.uniform(self.min_sleep, self.max_sleep)
-                    self.log(f"Đang xem Reels {sleep_time:.1f}s...")
-                    sleep_random(sleep_time, sleep_time + 1)
-
-                    self.log("Lướt Next Reels")
-                    x1, y1, x2, y2 = get_swipe_coords_2_7_up(self.screen_w, self.screen_h)
-                    self.adb.swipe(x1, y1, x2, y2)
-                    error_count = 0
-
-                # MODE: MIX_REELS
-                elif state == 'MIX_REELS':
-                    # Kiểm tra xem có về home không (15% cơ hội)
-                    if random.random() < 0.15:
+                # MODE: REELS_SPACE
+                elif state == 'REELS_SPACE':
+                    if ('NEWFEED' in self.mode or 'COMMENT' in self.mode) and random.random() < 0.05:
                         pt_home = self.matcher.find_image(screen, os.path.join(self.base_dir, 'img', 'reels', 'home.png'))
                         if pt_home:
                             self.log("Đã xem đủ Reels, bấm Home để về lại Newfeed...")
                             self.adb.click(*pt_home)
-                            state = 'MIX_NEWFEED'
+                            state = 'NEWFEED_SPACE'
+                            self.newfeed_swipes = 0
                             sleep_random(3, 5)
                             continue
 
@@ -207,64 +188,55 @@ class BotWorker(threading.Thread):
                     self.adb.swipe(x1, y1, x2, y2)
                     error_count = 0
 
-                # MODE: COMMENT
-                elif state == 'COMMENT':
-                    # Vừa lướt vừa tìm ảnh comment
-                    pt_cmt = self.matcher.find_image(screen, os.path.join(self.base_dir, 'img', 'comment', 'comment.png'))
-                    if pt_cmt:
-                        self.log("Đã thấy mục Comment. Bấm vào...")
-                        self.adb.click(*pt_cmt)
-                        sleep_random(2, 3)
-                        state = 'COMMENT_TYPING'
-                        error_count = 0
-                        continue
-
-                    self.log("Lướt tìm bài viết để comment...")
-                    x1, y1, x2, y2 = get_swipe_coords_2_7_up(self.screen_w, self.screen_h)
-                    self.adb.swipe(x1, y1, x2, y2)
-                    sleep_random(2, 4)
-                    error_count = 0
-
                 elif state == 'COMMENT_TYPING':
                     pt_type = self.matcher.find_image(screen, os.path.join(self.base_dir, 'img', 'comment', 'type.png'))
                     if pt_type:
                         self.log("Nháy vào ô input...")
                         self.adb.click(*pt_type)
-                        sleep_random(1, 2)
+                        sleep_random(3, 5)
                         
                         cmt_text = self.get_comment()
                         self.log(f"Gõ nội dung: {cmt_text}")
                         self.adb.input_text(cmt_text)
-                        sleep_random(1, 2)
+                        sleep_random(3, 5)
                         
                         state = 'COMMENT_SENDING'
                         error_count = 0
                     else:
                         error_count += 1
-                        sleep_random(1, 2)
+                        sleep_random(3, 5)
 
                 elif state == 'COMMENT_SENDING':
                     pt_send = self.matcher.find_image(screen, os.path.join(self.base_dir, 'img', 'comment', 'send.png'))
                     if pt_send:
                         self.log("Đã bấm Gửi comment")
                         self.adb.click(*pt_send)
-                        sleep_random(2, 3)
                         
-                        self.log("Lướt đóng popup comment...")
+                        sleep_time = random.uniform(self.min_sleep, self.max_sleep)
+                        self.log(f"Ngắm nội dung bình luận trong form {sleep_time:.1f}s...")
+                        sleep_random(sleep_time, sleep_time + 1)
+                        
+                        self.log("Kéo đóng popup comment...")
                         x1, y1, x2, y2 = get_swipe_close_popup(self.screen_w, self.screen_h)
-                        self.adb.swipe(x1, y1, x2, y2)
+                        self.adb.swipe(x1, y1, x2, y2, duration=1500)
                         sleep_random(1, 2)
                         
                         # Về lại việc tìm bài đăng khác
-                        state = 'COMMENT'
+                        state = 'NEWFEED_SPACE'
+                        self.newfeed_swipes = 0
                         error_count = 0
+                        
+                        sleep_time = random.uniform(self.min_sleep, self.max_sleep)
+                        self.log(f"Nán lại ngắm bài đăng vừa comment {sleep_time:.1f}s...")
+                        sleep_random(sleep_time, sleep_time + 1)
                     else:
                         # Nếu ko thấy nút gửi, có khi dã nhập lỗi or che màn, gạt xuống để đóng
-                        self.log("Chưa thấy nút gửi, đóng popup thử...")
+                        self.log("Chưa thấy nút gửi, kéo đóng popup thử...")
                         x1, y1, x2, y2 = get_swipe_close_popup(self.screen_w, self.screen_h)
-                        self.adb.swipe(x1, y1, x2, y2)
+                        self.adb.swipe(x1, y1, x2, y2, duration=1500)
                         sleep_random(1, 2)
-                        state = 'COMMENT'
+                        state = 'NEWFEED_SPACE'
+                        self.newfeed_swipes = 0
                         error_count += 1
 
             except Exception as e:

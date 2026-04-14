@@ -30,7 +30,7 @@ class BotManager:
         for ws in self.active_websockets:
             asyncio.run_coroutine_threadsafe(ws.send_text(payload), self.loop)
 
-    def start_bot(self, device_id: str, mode: str, resolution: str, min_sleep: float, max_sleep: float) -> dict:
+    def start_bot(self, device_id: str, mode: List[str], resolution: str, min_sleep: float, max_sleep: float) -> dict:
         if device_id in self.workers and self.workers[device_id].is_running:
             return {"success": False, "error": "Bot is already running for this device."}
         

@@ -4,7 +4,7 @@ import asyncio
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from bot_manager import BotManager
 import config_helper
@@ -22,7 +22,7 @@ app.add_middleware(
 bot_manager = BotManager()
 
 class StartBotPayload(BaseModel):
-    mode: str
+    mode: List[str]
     resolution: str
     min_sleep: float = 3.0
     max_sleep: float = 8.0
